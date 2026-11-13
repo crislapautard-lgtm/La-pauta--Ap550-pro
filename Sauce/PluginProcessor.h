@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <juce_audio_utils/juce_audio_utils.h>
@@ -12,7 +13,7 @@ public:
     AP550Processor();
     ~AP550Processor() override = default;
 
-    // --- AudioProcessor
+    // AudioProcessor
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
     bool isBusesLayoutSupported (const BusesLayout&) const override;
@@ -21,8 +22,12 @@ public:
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
 
-    const juce::String getName() const override { return "La Pauta AP550 Pro"; }
-    bool acceptsMidi() const override  { return false; }
+    const juce::String getName() const override
+    {
+        return "La Pauta AP550 Pro";
+    }
+
+    bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
@@ -36,7 +41,7 @@ public:
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
 
-    // --- Presets
+    // Presets
     void loadFactoryPreset (int index);
     void stepPreset (int direction);
     juce::String getPresetName() const;
@@ -47,21 +52,22 @@ public:
     bool saveUserPreset (const juce::String& name);
     bool loadUserPreset (const juce::File& file);
 
-    // --- A/B
+    // A/B
     void toggleSlot();
     void copyToOtherSlot();
     int getActiveSlot() const { return activeSlot; }
 
-    // --- Estado público (lo usa el editor)
-    juce::UndoManager undo;                         // debe declararse antes que apvts
+    // Estado público para el editor
+    juce::UndoManager undo;
     juce::AudioProcessorValueTreeState apvts;
 
-    std::atomic<float> vuL { -60.f }, vuR { -60.f }; // nivel RMS en dBFS
+    std::atomic<float> vuL { -60.0f };
+    std::atomic<float> vuR { -60.0f };
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
-    int  idx (const char* id) const;
+    int idx (const char* id) const;
     bool flag (const char* id) const;
     void setChoice (const char* id, int index);
     void setBool (const char* id, bool value);
@@ -75,7 +81,7 @@ private:
 
     double sampleRate = 44100.0;
     int lastKey = -1;
-    std::array<float, 2> vuState { 0.f, 0.f };
+    std::array<float, 2> vuState { 0.0f, 0.0f };
 
     juce::ValueTree slotState[2];
     int activeSlot = 0;
