@@ -10,9 +10,7 @@ AP550Processor::AP550Processor()
     slotStates[1] = apvts.copyState();
 }
 
-AP550Processor::~AP550Processor()
-{
-}
+AP550Processor::~AP550Processor() {}
 
 const juce::String AP550Processor::getName() const { return "La Pauta AP550 Pro"; }
 bool AP550Processor::acceptsMidi() const { return false; }
