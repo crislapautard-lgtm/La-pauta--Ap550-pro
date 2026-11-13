@@ -35,9 +35,9 @@ void AP550Editor::buildBackground()
     g.setColour (juce::Colour (0xff2a2a2a));
     g.fillRoundedRectangle (10, 10, kW-20, kH-20, 18);
     g.setColour (juce::Colours::white);
-    g.setFont (juce::Font (22.0f, juce::Font::bold));
+    g.setFont (juce::Font (juce::FontOptions (22.0f, juce::Font::bold)));
     g.drawText ("LA PAUTA AP550 PRO", 20, 18, kW-40, 30, juce::Justification::centred);
-    g.setFont (juce::Font (13.0f));
+    g.setFont (juce::Font (juce::FontOptions (13.0f)));
     g.setColour (juce::Colour (0xffaaaaaa));
     g.drawText ("API 550 STYLE EQ", 20, 48, kW-40, 20, juce::Justification::centred);
     auto knob = [&] (int x, int y, const char* label)
@@ -47,13 +47,13 @@ void AP550Editor::buildBackground()
         g.setColour (juce::Colour (0xff555555));
         g.drawEllipse ((float)x, (float)y, 72, 72, 2.0f);
         g.setColour (juce::Colours::white);
-        g.setFont (juce::Font (11.0f, juce::Font::bold));
+        g.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
         g.drawText (label, x-10, y+76, 92, 16, juce::Justification::centred);
     };
     knob (28, 110, "LF GAIN"); knob (128, 110, "LF FREQ"); knob (228, 110, "MF GAIN"); knob (328, 110, "MF FREQ");
     knob (28, 240, "HF GAIN"); knob (128, 240, "HF FREQ"); knob (228, 240, "OUTPUT");
     g.setColour (juce::Colours::white);
-    g.setFont (juce::Font (12.0f, juce::Font::bold));
+    g.setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::bold)));
     g.drawText ("PRESET: " + proc.getPresetName(), 20, 380, kW-40, 22, juce::Justification::centred);
     g.drawText ("A/B SLOT: " + juce::String (proc.getActiveSlot() == 0 ? "A" : "B"), 20, 405, kW-40, 22, juce::Justification::centred);
     auto btn = [&] (int x, int y, int w, const char* t)
@@ -61,7 +61,7 @@ void AP550Editor::buildBackground()
         g.setColour (juce::Colour (0xff333333));
         g.fillRoundedRectangle ((float)x, (float)y, (float)w, 30, 6);
         g.setColour (juce::Colours::white);
-        g.setFont (juce::Font (12.0f, juce::Font::bold));
+        g.setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::bold)));
         g.drawText (t, x, y, w, 30, juce::Justification::centred);
     };
     btn (20, 440, 90, "PREV"); btn (120, 440, 90, "NEXT"); btn (220, 440, 90, "A/B"); btn (320, 440, 90, "COPY");
@@ -70,7 +70,7 @@ void AP550Editor::buildBackground()
     g.setColour (juce::Colour (0xff0a0a0a));
     g.fillRoundedRectangle (20, 580, kW-40, 120, 8);
     g.setColour (juce::Colour (0xffccaa00));
-    g.setFont (juce::Font (11.0f, juce::Font::bold));
+    g.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
     g.drawText ("VU  L", 30, 585, 60, 16, juce::Justification::left);
     g.drawText ("VU  R", 30, 640, 60, 16, juce::Justification::left);
 }
@@ -99,20 +99,20 @@ void AP550Editor::paint (juce::Graphics& g)
         g.setColour (juce::Colours::white);
         g.drawLine (l, 2.5f);
         g.setColour (juce::Colours::white);
-        g.setFont (juce::Font (11.0f * s, juce::Font::bold));
-        g.drawText (txt, r.getX()-10*s, r.getBottom()+2*s, 92*s, 14*s, juce::Justification::centred);
+        g.setFont (juce::Font (juce::FontOptions (11.0f * s, juce::Font::bold)));
+        g.drawText (txt, (int)(r.getX()-10*s), (int)(r.getBottom()+2*s), (int)(92*s), (int)(14*s), juce::Justification::centred);
     };
-    drawKnobVal (28, 110, getIdx (ap::kLfGain) / 10.0f, juce::String (getIdx (ap::kLfGain)));
-    drawKnobVal (128, 110, getIdx (ap::kLfFreq) / 4.0f, juce::String (getIdx (ap::kLfFreq)));
-    drawKnobVal (228, 110, getIdx (ap::kMfGain) / 10.0f, juce::String (getIdx (ap::kMfGain)));
-    drawKnobVal (328, 110, getIdx (ap::kMfFreq) / 4.0f, juce::String (getIdx (ap::kMfFreq)));
-    drawKnobVal (28, 240, getIdx (ap::kHfGain) / 10.0f, juce::String (getIdx (ap::kHfGain)));
-    drawKnobVal (128, 240, getIdx (ap::kHfFreq) / 4.0f, juce::String (getIdx (ap::kHfFreq)));
+    drawKnobVal (28, 110, (float) getIdx (ap::kLfGain) / 10.0f, juce::String (getIdx (ap::kLfGain)));
+    drawKnobVal (128, 110, (float) getIdx (ap::kLfFreq) / 4.0f, juce::String (getIdx (ap::kLfFreq)));
+    drawKnobVal (228, 110, (float) getIdx (ap::kMfGain) / 10.0f, juce::String (getIdx (ap::kMfGain)));
+    drawKnobVal (328, 110, (float) getIdx (ap::kMfFreq) / 4.0f, juce::String (getIdx (ap::kMfFreq)));
+    drawKnobVal (28, 240, (float) getIdx (ap::kHfGain) / 10.0f, juce::String (getIdx (ap::kHfGain)));
+    drawKnobVal (128, 240, (float) getIdx (ap::kHfFreq) / 4.0f, juce::String (getIdx (ap::kHfFreq)));
     drawKnobVal (228, 240, (getVal (ap::kOutput) + 18.0f) / 36.0f, juce::String (getVal (ap::kOutput), 1));
     g.setColour (juce::Colours::white);
-    g.setFont (juce::Font (12.0f * s, juce::Font::bold));
-    g.drawText ("PRESET: " + proc.getPresetName(), 20*s, 380*s, (kW-40)*s, 22*s, juce::Justification::centred);
-    g.drawText ("A/B SLOT: " + juce::String (proc.getActiveSlot() == 0 ? "A" : "B"), 20*s, 405*s, (kW-40)*s, 22*s, juce::Justification::centred);
+    g.setFont (juce::Font (juce::FontOptions (12.0f * s, juce::Font::bold)));
+    g.drawText ("PRESET: " + proc.getPresetName(), (int)(20*s), (int)(380*s), (int)((kW-40)*s), (int)(22*s), juce::Justification::centred);
+    g.drawText ("A/B SLOT: " + juce::String (proc.getActiveSlot() == 0 ? "A" : "B"), (int)(20*s), (int)(405*s), (int)((kW-40)*s), (int)(22*s), juce::Justification::centred);
     drawMeterNeedle (g, scaled ({ 30, 585, 360, 45 }, s), needleL);
     drawMeterNeedle (g, scaled ({ 30, 640, 360, 45 }, s), needleR);
     if (getBool (ap::kEqIn)) { g.setColour (juce::Colours::lime); g.fillEllipse (scaled ({ 305, 480, 10, 10 }, s)); }
@@ -170,7 +170,7 @@ void AP550Editor::mouseDrag (const juce::MouseEvent& e)
         int steps = (int) (dy / 12.0f);
         int nv = juce::jlimit (0, 10, dragLastIdx + steps);
         if (dragBand == 1 || dragBand == 3 || dragBand == 5) nv = juce::jlimit (0, 4, dragLastIdx + steps);
-        setIdx (dragParam->getParameterID().getParamID(), nv);
+        dragParam->setValueNotifyingHost (dragParam->convertTo0to1 ((float) nv));
     }
     else if (dragKind == DragKind::output)
     {
@@ -200,7 +200,7 @@ void AP550Editor::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWh
     else if (hit (328, 110)) setIdx (ap::kMfFreq, juce::jlimit (0, 4, getIdx (ap::kMfFreq) + dir));
     else if (hit (28, 240)) setIdx (ap::kHfGain, juce::jlimit (0, 10, getIdx (ap::kHfGain) + dir));
     else if (hit (128, 240)) setIdx (ap::kHfFreq, juce::jlimit (0, 4, getIdx (ap::kHfFreq) + dir));
-    else if (hit (228, 240)) setVal (ap::kOutput, juce::jlimit (-18.0f, 18.0f, getVal (ap::kOutput) + dir * 0.5f));
+    else if (hit (228, 240)) setVal (ap::kOutput, juce::jlimit (-18.0f, 18.0f, getVal (ap::kOutput) + (float) dir * 0.5f));
     repaint();
 }
 void AP550Editor::runTool (int) {}
