@@ -1,0 +1,29 @@
+name: Compilar plugin
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Configurar
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Compilar
+        run: cmake --build build --config Release
+
+      - name: Guardar el plugin compilado
+        uses: actions/upload-artifact@v4
+        with:
+          name: La-Pauta-AP550-Pro-${{ matrix.os }}
+          path: build/LaPautaAP550Pro_artefacts/Release
