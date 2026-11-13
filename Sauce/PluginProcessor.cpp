@@ -1,756 +1,284 @@
-
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
-#include <algorithm>
-#include <cmath>
-
-namespace
-{
-    constexpr float kDbFloor = -60.0f;
-    constexpr float kAnalogDrive = 1.35f;
-
-    float safeDb (float value)
-    {
-        return juce::jlimit (-60.0f, 18.0f, value);
-    }
-
-    int safeIndex (int value, int maximum)
-    {
-        return juce::jlimit (0, maximum, value);
-    }
-}
-
-// =============================================================================
-// CONSTRUCTOR
-// =============================================================================
-
 AP550Processor::AP550Processor()
-    : juce::AudioProcessor (
-        BusesProperties()
-            .withInput ("Input",
-                        juce::AudioChannelSet::stereo(),
-                        true)
-            .withOutput ("Output",
-                         juce::AudioChannelSet::stereo(),
-                         true)),
-      apvts (*this, &undo, "PARAMS", createLayout())
+    : AudioProcessor (BusesProperties().withInput ("Input", juce::AudioChannelSet::stereo(), true)
+                                       .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+      apvts (*this, &undo, "Parameters", createParameterLayout())
 {
-    slotState[0] = apvts.copyState();
-    slotState[1] = apvts.copyState();
+    slotStates[0] = apvts.copyState();
+    slotStates[1] = apvts.copyState();
 }
 
-// =============================================================================
-// PARÁMETROS
-// =============================================================================
-
-juce::AudioProcessorValueTreeState::ParameterLayout
-AP550Processor::createLayout()
+AP550Processor::~AP550Processor()
 {
-    juce::AudioProcessorValueTreeState::ParameterLayout layout;
-
-    using Choice = juce::AudioParameterChoice;
-    using Bool = juce::AudioParameterBool;
-    using Float = juce::AudioParameterFloat;
-
-    const juce::StringArray gains = ap::gainNames();
-
-    layout.add (std::make_unique<Choice>(
-        juce::ParameterID { ap::kLfGain, 1 },
-        "LF Gain",
-        gains,
-        5));
-
-    layout.add (std::make_unique<Choice>(
-        juce::ParameterID { ap::kLfFreq, 1 },
-        "LF Frequency",
-        ap::lfFreqNames(),
-        1));
-
-    layout.add (std::make_unique<Bool>(
-        juce::ParameterID { ap::kLfBell, 1 },
-        "LF Bell",
-        false));
-
-    layout.add (std::make_unique<Choice>(
-        juce::ParameterID { ap::kMfGain, 1 },
-        "MF Gain",
-        gains,
-        5));
-
-    layout.add (std::make_unique<Choice>(
-        juce::ParameterID { ap::kMfFreq, 1 },
-        "MF Frequency",
-        ap::mfFreqNames(),
-        2));
-
-    layout.add (std::make_unique<Choice>(
-        juce::ParameterID { ap::kHfGain, 1 },
-        "HF Gain",
-        gains,
-        5));
-
-    layout.add (std::make_unique<Choice>(
-        juce::ParameterID { ap::kHfFreq, 1 },
-        "HF Frequency",
-        ap::hfFreqNames(),
-        2));
-
-    layout.add (std::make_unique<Bool>(
-        juce::ParameterID { ap::kHfBell, 1 },
-        "HF Bell",
-        false));
-
-    layout.add (std::make_unique<Bool>(
-        juce::ParameterID { ap::kEqIn, 1 },
-        "EQ In",
-        true));
-
-    layout.add (std::make_unique<Bool>(
-        juce::ParameterID { ap::kFilter, 1 },
-        "Filter",
-        false));
-
-    layout.add (std::make_unique<Bool>(
-        juce::ParameterID { ap::kPolarity, 1 },
-        "Polarity",
-        false));
-
-    layout.add (std::make_unique<Bool>(
-        juce::ParameterID { ap::kAnalog, 1 },
-        "Analog",
-        true));
-
-    layout.add (std::make_unique<Float>(
-        juce::ParameterID { ap::kOutput, 1 },
-        "Output",
-        juce::NormalisableRange<float> (-18.0f, 18.0f, 0.1f),
-        0.0f));
-
-    return layout;
 }
 
-// =============================================================================
-// LECTURA DE PARÁMETROS
-// =============================================================================
+const juce::String AP550Processor::getName() const { return "La Pauta AP550 Pro"; }
+bool AP550Processor::acceptsMidi() const { return false; }
+bool AP550Processor::producesMidi() const { return false; }
+bool AP550Processor::isMidiEffect() const { return false; }
+double AP550Processor::getTailLengthSeconds() const { return 0.0; }
+int AP550Processor::getNumPrograms() { return 1; }
+int AP550Processor::getCurrentProgram() { return 0; }
+void AP550Processor::setCurrentProgram (int) {}
+const juce::String AP550Processor::getProgramName (int) { return {}; }
+void AP550Processor::changeProgramName (int, const juce::String&) {}
+bool AP550Processor::hasEditor() const { return true; }
+juce::AudioProcessorEditor* AP550Processor::createEditor() { return new AP550Editor (*this); }
 
-int AP550Processor::idx (const char* id) const
+bool AP550Processor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
-    if (auto* value = apvts.getRawParameterValue (id))
-        return static_cast<int> (std::round (value->load()));
-
-    return 0;
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono()
+        && layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+        return false;
+    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
+        return false;
+    return true;
 }
 
-bool AP550Processor::flag (const char* id) const
+juce::AudioProcessorValueTreeState::ParameterLayout AP550Processor::createParameterLayout()
 {
-    if (auto* value = apvts.getRawParameterValue (id))
-        return value->load() >= 0.5f;
-
-    return false;
-}
-
-// =============================================================================
-// ESCRITURA DE PARÁMETROS
-// =============================================================================
-
-void AP550Processor::setChoice (const char* id, int index)
-{
-    if (auto* parameter = apvts.getParameter (id))
+    std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
+    auto gainChoices = []()
     {
-        const float normalized =
-            parameter->convertTo0to1 (static_cast<float> (index));
-
-        parameter->beginChangeGesture();
-        parameter->setValueNotifyingHost (normalized);
-        parameter->endChangeGesture();
-    }
+        juce::StringArray s;
+        s.add ("-12"); s.add ("-9"); s.add ("-6"); s.add ("-4"); s.add ("-2");
+        s.add ("0"); s.add ("+2"); s.add ("+4"); s.add ("+6"); s.add ("+9"); s.add ("+12");
+        return s;
+    };
+    auto freqLF = []() { juce::StringArray s; s.add ("50"); s.add ("100"); s.add ("200"); s.add ("300"); s.add ("400"); return s; };
+    auto freqMF = []() { juce::StringArray s; s.add ("0.4"); s.add ("0.8"); s.add ("1.5"); s.add ("3"); s.add ("5"); return s; };
+    auto freqHF = []() { juce::StringArray s; s.add ("5"); s.add ("7.5"); s.add ("10"); s.add ("12.5"); s.add ("15"); return s; };
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID (ap::kLfGain, 1), "LF Gain", gainChoices(), 5));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID (ap::kLfFreq, 1), "LF Freq", freqLF(), 2));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (juce::ParameterID (ap::kLfBell, 1), "LF Bell", false));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID (ap::kMfGain, 1), "MF Gain", gainChoices(), 5));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID (ap::kMfFreq, 1), "MF Freq", freqMF(), 2));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID (ap::kHfGain, 1), "HF Gain", gainChoices(), 5));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (juce::ParameterID (ap::kHfFreq, 1), "HF Freq", freqHF(), 2));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (juce::ParameterID (ap::kHfBell, 1), "HF Bell", false));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (juce::ParameterID (ap::kEqIn, 1), "EQ In", true));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (juce::ParameterID (ap::kFilter, 1), "Filter", false));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (juce::ParameterID (ap::kPolarity, 1), "Polarity", false));
+    params.push_back (std::make_unique<juce::AudioParameterBool> (juce::ParameterID (ap::kAnalog, 1), "Analog", false));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (juce::ParameterID (ap::kOutput, 1), "Output",
+        juce::NormalisableRange<float> (-18.0f, 18.0f, 0.1f), 0.0f));
+    return { params.begin(), params.end() };
 }
 
-void AP550Processor::setBool (const char* id, bool value)
+void AP550Processor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    if (auto* parameter = apvts.getParameter (id))
+    juce::ignoreUnused (samplesPerBlock);
+    lastSampleRate = sampleRate;
+    juce::dsp::ProcessSpec spec { sampleRate, (juce::uint32) samplesPerBlock, 2 };
+    for (int ch = 0; ch < 2; ++ch)
     {
-        parameter->beginChangeGesture();
-        parameter->setValueNotifyingHost (
-            value ? 1.0f : 0.0f);
-        parameter->endChangeGesture();
+        lf[ch].prepare (spec);
+        mf[ch].prepare (spec);
+        hf[ch].prepare (spec);
+        lp[ch].prepare (spec);
+        lf[ch].reset();
+        mf[ch].reset();
+        hf[ch].reset();
+        lp[ch].reset();
     }
-}
-
-// =============================================================================
-// PREPARACIÓN DE AUDIO
-// =============================================================================
-
-void AP550Processor::prepareToPlay (
-    double newSampleRate,
-    int samplesPerBlock)
-{
-    sampleRate = newSampleRate;
-
-    juce::dsp::ProcessSpec spec;
-
-    spec.sampleRate = sampleRate;
-    spec.maximumBlockSize =
-        static_cast<juce::uint32> (
-            juce::jmax (1, samplesPerBlock));
-
-    spec.numChannels = 2;
-
-    outGain.prepare (spec);
-    outGain.setRampDurationSeconds (0.02);
-
-    for (int channel = 0; channel < 2; ++channel)
-    {
-        lf[channel].reset();
-        mf[channel].reset();
-        hf[channel].reset();
-        lp[channel].reset();
-    }
-
-    lastKey = -1;
-
     updateFilters();
 }
 
-// =============================================================================
-// CONFIGURACIÓN DE CANALES
-// =============================================================================
-
-bool AP550Processor::isBusesLayoutSupported (
-    const BusesLayout& layouts) const
-{
-    const auto input =
-        layouts.getMainInputChannelSet();
-
-    const auto output =
-        layouts.getMainOutputChannelSet();
-
-    if (input != output)
-        return false;
-
-    return input == juce::AudioChannelSet::mono()
-        || input == juce::AudioChannelSet::stereo();
-}
-
-// =============================================================================
-// ACTUALIZACIÓN DE FILTROS
-// =============================================================================
+void AP550Processor::releaseResources() {}
 
 void AP550Processor::updateFilters()
 {
-    const int lfGainIndex = safeIndex (idx (ap::kLfGain), 10);
-    const int lfFreqIndex = safeIndex (idx (ap::kLfFreq), 4);
-
-    const int mfGainIndex = safeIndex (idx (ap::kMfGain), 10);
-    const int mfFreqIndex = safeIndex (idx (ap::kMfFreq), 4);
-
-    const int hfGainIndex = safeIndex (idx (ap::kHfGain), 10);
-    const int hfFreqIndex = safeIndex (idx (ap::kHfFreq), 4);
-
-    const bool lfBell = flag (ap::kLfBell);
-    const bool hfBell = flag (ap::kHfBell);
-
-    const int key =
-        lfGainIndex
-        + lfFreqIndex * 20
-        + mfGainIndex * 200
-        + mfFreqIndex * 2000
-        + hfGainIndex * 20000
-        + hfFreqIndex * 200000
-        + static_cast<int> (lfBell) * 2000000
-        + static_cast<int> (hfBell) * 4000000;
-
-    if (key == lastKey)
-        return;
-
-    lastKey = key;
-
-    // IMPORTANTE:
-    // Estos son arreglos definidos en Params.h.
-    // No se utilizan paréntesis.
-
-    const float lowFrequency =
-        ap::lfFreqValues[lfFreqIndex];
-
-    const float midFrequency =
-        ap::mfFreqValues[mfFreqIndex];
-
-    const float highFrequency =
-        ap::hfFreqValues[hfFreqIndex];
-
-    const float lowDb =
-        ap::gainValues[lfGainIndex];
-
-    const float midDb =
-        ap::gainValues[mfGainIndex];
-
-    const float highDb =
-        ap::gainValues[hfGainIndex];
-
-    const float nyquistLimit =
-        static_cast<float> (sampleRate * 0.45);
-
-    const float lowHz =
-        juce::jlimit (20.0f, nyquistLimit, lowFrequency);
-
-    const float midHz =
-        juce::jlimit (20.0f, nyquistLimit, midFrequency);
-
-    const float highHz =
-        juce::jlimit (20.0f, nyquistLimit, highFrequency);
-
-    const float lowPassHz =
-        juce::jlimit (100.0f, nyquistLimit, 18000.0f);
-
-    auto lowCoefficients = lfBell
-        ? Coeffs::makePeakFilter (
-            sampleRate,
-            lowHz,
-            0.8f,
-            juce::Decibels::decibelsToGain (lowDb))
-        : Coeffs::makeLowShelf (
-            sampleRate,
-            lowHz,
-            0.707f,
-            juce::Decibels::decibelsToGain (lowDb));
-
-    auto midCoefficients =
-        Coeffs::makePeakFilter (
-            sampleRate,
-            midHz,
-            1.0f,
-            juce::Decibels::decibelsToGain (midDb));
-
-    auto highCoefficients = hfBell
-        ? Coeffs::makePeakFilter (
-            sampleRate,
-            highHz,
-            0.8f,
-            juce::Decibels::decibelsToGain (highDb))
-        : Coeffs::makeHighShelf (
-            sampleRate,
-            highHz,
-            0.707f,
-            juce::Decibels::decibelsToGain (highDb));
-
-    auto lowPassCoefficients =
-        Coeffs::makeLowPass (
-            sampleRate,
-            lowPassHz,
-            0.707f);
-
-    for (int channel = 0; channel < 2; ++channel)
+    auto getIdx = [this] (const char* id) { return (int) std::lround (apvts.getRawParameterValue (id)->load()); };
+    auto getBool = [this] (const char* id) { return apvts.getRawParameterValue (id)->load() > 0.5f; };
+    static const float gainDb[11] = { -12, -9, -6, -4, -2, 0, 2, 4, 6, 9, 12 };
+    static const float lfFreq[5] = { 50, 100, 200, 300, 400 };
+    static const float mfFreq[5] = { 400, 800, 1500, 3000, 5000 };
+    static const float hfFreq[5] = { 5000, 7500, 10000, 12500, 15000 };
+    const float lfG = gainDb[getIdx (ap::kLfGain)];
+    const float mfG = gainDb[getIdx (ap::kMfGain)];
+    const float hfG = gainDb[getIdx (ap::kHfGain)];
+    const bool lfBell = getBool (ap::kLfBell);
+    const bool hfBell = getBool (ap::kHfBell);
+    for (int ch = 0; ch < 2; ++ch)
     {
-        lf[channel].coefficients = lowCoefficients;
-        mf[channel].coefficients = midCoefficients;
-        hf[channel].coefficients = highCoefficients;
-        lp[channel].coefficients = lowPassCoefficients;
+        if (lfBell)
+            lf[ch].coefficients = juce::dsp::IIR::Coefficients<float>::makePeakFilter (lastSampleRate, lfFreq[getIdx (ap::kLfFreq)], 1.0f, juce::Decibels::decibelsToGain (lfG));
+        else
+            lf[ch].coefficients = juce::dsp::IIR::Coefficients<float>::makeLowShelf (lastSampleRate, lfFreq[getIdx (ap::kLfFreq)], 0.7f, juce::Decibels::decibelsToGain (lfG));
+        mf[ch].coefficients = juce::dsp::IIR::Coefficients<float>::makePeakFilter (lastSampleRate, mfFreq[getIdx (ap::kMfFreq)], 1.2f, juce::Decibels::decibelsToGain (mfG));
+        if (hfBell)
+            hf[ch].coefficients = juce::dsp::IIR::Coefficients<float>::makePeakFilter (lastSampleRate, hfFreq[getIdx (ap::kHfFreq)], 1.0f, juce::Decibels::decibelsToGain (hfG));
+        else
+            hf[ch].coefficients = juce::dsp::IIR::Coefficients<float>::makeHighShelf (lastSampleRate, hfFreq[getIdx (ap::kHfFreq)], 0.7f, juce::Decibels::decibelsToGain (hfG));
+        lp[ch].coefficients = juce::dsp::IIR::Coefficients<float>::makeLowPass (lastSampleRate, 18000.0f, 0.7f);
     }
 }
 
-// =============================================================================
-// PROCESAMIENTO PRINCIPAL
-// =============================================================================
-
-void AP550Processor::processBlock (
-    juce::AudioBuffer<float>& buffer,
-    juce::MidiBuffer& midiMessages)
+void AP550Processor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
-
-    juce::ignoreUnused (midiMessages);
-
-    const int inputChannels =
-        getTotalNumInputChannels();
-
-    const int outputChannels =
-        getTotalNumOutputChannels();
-
-    const int numSamples =
-        buffer.getNumSamples();
-
-    // Limpiar canales de salida adicionales.
-
-    for (int channel = inputChannels;
-         channel < outputChannels;
-         ++channel)
-    {
-        buffer.clear (channel, 0, numSamples);
-    }
-
-    if (numSamples <= 0 || inputChannels <= 0)
-        return;
-
+    auto totalNumInputChannels = getTotalNumInputChannels();
+    auto totalNumOutputChannels = getTotalNumOutputChannels();
+    for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
+        buffer.clear (i, 0, buffer.getNumSamples());
     updateFilters();
-
-    const bool eqEnabled = flag (ap::kEqIn);
-    const bool filterEnabled = flag (ap::kFilter);
-    const bool polarityInverted = flag (ap::kPolarity);
-    const bool analogEnabled = flag (ap::kAnalog);
-
-    const float outputDb = safeDb (
-        apvts.getRawParameterValue (ap::kOutput) != nullptr
-            ? apvts.getRawParameterValue (ap::kOutput)->load()
-            : 0.0f);
-
-    outGain.setGainDecibels (outputDb);
-
-    const int channelsToProcess =
-        juce::jmin (inputChannels, 2);
-
-    float peakSquareL = 0.0f;
-    float peakSquareR = 0.0f;
-
-    // EQ y procesamiento analógico.
-
-    for (int channel = 0;
-         channel < channelsToProcess;
-         ++channel)
+    const bool eqIn = apvts.getRawParameterValue (ap::kEqIn)->load() > 0.5f;
+    const bool filterOn = apvts.getRawParameterValue (ap::kFilter)->load() > 0.5f;
+    const bool polarity = apvts.getRawParameterValue (ap::kPolarity)->load() > 0.5f;
+    const bool analog = apvts.getRawParameterValue (ap::kAnalog)->load() > 0.5f;
+    const float outGain = juce::Decibels::decibelsToGain (apvts.getRawParameterValue (ap::kOutput)->load());
+    float peakL = 0.0f, peakR = 0.0f;
+    for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
-        float* data = buffer.getWritePointer (channel);
-
-        for (int sample = 0; sample < numSamples; ++sample)
+        auto* data = buffer.getWritePointer (channel);
+        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
         {
             float x = data[sample];
-
-            if (eqEnabled)
+            if (polarity) x = -x;
+            if (eqIn)
             {
                 x = lf[channel].processSample (x);
                 x = mf[channel].processSample (x);
                 x = hf[channel].processSample (x);
             }
-
-            if (filterEnabled)
-            {
+            if (filterOn)
                 x = lp[channel].processSample (x);
-            }
-
-            if (analogEnabled)
-            {
-                const float driven =
-                    std::tanh (x * kAnalogDrive);
-
-                const float reference =
-                    std::tanh (kAnalogDrive);
-
-                x = reference > 0.0f
-                    ? driven / reference
-                    : x;
-            }
-
-            if (polarityInverted)
-                x = -x;
-
+            if (analog)
+                x = std::tanh (x * 1.1f);
+            x *= outGain;
             data[sample] = x;
-
-            if (channel == 0)
-                peakSquareL += x * x;
-            else
-                peakSquareR += x * x;
+            float a = std::abs (x);
+            if (channel == 0) peakL = juce::jmax (peakL, a);
+            else peakR = juce::jmax (peakR, a);
         }
     }
-
-    // Ganancia de salida con rampa para evitar clics.
-
-    juce::dsp::AudioBlock<float> audioBlock (buffer);
-
-    juce::dsp::ProcessContextReplacing<float> context (
-        audioBlock);
-
-    outGain.process (context);
-
-    // Medición RMS en dBFS.
-
-    const float inverseSamples =
-        1.0f / static_cast<float> (numSamples);
-
-    const float rmsL =
-        std::sqrt (peakSquareL * inverseSamples);
-
-    const float rmsR =
-        inputChannels > 1
-            ? std::sqrt (peakSquareR * inverseSamples)
-            : rmsL;
-
-    const float dbL =
-        juce::Decibels::gainToDecibels (
-            rmsL,
-            kDbFloor);
-
-    const float dbR =
-        juce::Decibels::gainToDecibels (
-            rmsR,
-            kDbFloor);
-
-    vuL.store (dbL);
-    vuR.store (dbR);
+    auto toDb = [] (float p) { return p > 0.00001f ? juce::jlimit (-60.0f, 3.0f, juce::Decibels::gainToDecibels (p)) : -60.0f; };
+    vuL.store (toDb (peakL));
+    vuR.store (toDb (peakR));
 }
 
-// =============================================================================
-// EDITOR
-// =============================================================================
-
-juce::AudioProcessorEditor*
-AP550Processor::createEditor()
+void AP550Processor::getStateInformation (juce::MemoryBlock& destData)
 {
-    return new AP550Editor (*this);
+    auto state = apvts.copyState();
+    std::unique_ptr<juce::XmlElement> xml (state.createXml());
+    copyXmlToBinary (*xml, destData);
 }
 
-// =============================================================================
-// GUARDAR ESTADO
-// =============================================================================
-
-void AP550Processor::getStateInformation (
-    juce::MemoryBlock& destinationData)
+void AP550Processor::setStateInformation (const void* data, int sizeInBytes)
 {
-    const auto state = apvts.copyState();
-
-    if (auto xml = state.createXml())
-        copyXmlToBinary (*xml, destinationData);
-}
-
-// =============================================================================
-// RESTAURAR ESTADO
-// =============================================================================
-
-void AP550Processor::setStateInformation (
-    const void* data,
-    int sizeInBytes)
-{
-    if (auto xml = getXmlFromBinary (data, sizeInBytes))
+    std::unique_ptr<juce::XmlElement> xml (getXmlFromBinary (data, sizeInBytes));
+    if (xml == nullptr || ! xml->hasTagName ("LaPautaAP550Pro"))
     {
-        if (xml->hasTagName (apvts.state.getType()))
+        if (xml != nullptr)
         {
-            const auto restoredState =
-                juce::ValueTree::fromXml (*xml);
-
-            if (restoredState.isValid())
-            {
-                apvts.replaceState (restoredState);
-                lastKey = -1;
-            }
+            auto tree = juce::ValueTree::fromXml (*xml);
+            if (tree.isValid())
+                apvts.replaceState (tree);
         }
+        return;
     }
+    auto tree = juce::ValueTree::fromXml (*xml);
+    if (tree.isValid())
+        apvts.replaceState (tree);
 }
 
-// =============================================================================
-// PRESETS DE FÁBRICA
-// =============================================================================
+juce::String AP550Processor::getPresetName() const { return presetName; }
+int AP550Processor::getPresetIndex() const { return presetIndex; }
+int AP550Processor::getActiveSlot() const { return activeSlot; }
 
+void AP550Processor::saveSlot (int slot)
+{
+    if (slot >= 0 && slot < 2)
+        slotStates[(size_t) slot] = apvts.copyState();
+}
+void AP550Processor::loadSlot (int slot)
+{
+    if (slot >= 0 && slot < 2)
+        apvts.replaceState (slotStates[(size_t) slot]);
+}
+void AP550Processor::toggleSlot()
+{
+    saveSlot (activeSlot);
+    activeSlot = (activeSlot == 0 ? 1 : 0);
+    loadSlot (activeSlot);
+}
+void AP550Processor::copyToOtherSlot()
+{
+    int other = (activeSlot == 0 ? 1 : 0);
+    slotStates[(size_t) other] = apvts.copyState();
+}
+void AP550Processor::applyPresetValues (const ap::Preset& p)
+{
+    auto setChoice = [this] (const char* id, float idx)
+    {
+        if (auto* par = apvts.getParameter (id))
+            par->setValueNotifyingHost (par->convertTo0to1 (idx));
+    };
+    auto setBool = [this] (const char* id, float v)
+    {
+        if (auto* par = apvts.getParameter (id))
+            par->setValueNotifyingHost (v > 0.5f ? 1.0f : 0.0f);
+    };
+    auto setFloat = [this] (const char* id, float v)
+    {
+        if (auto* par = apvts.getParameter (id))
+            par->setValueNotifyingHost (par->convertTo0to1 (v));
+    };
+    setChoice (ap::kLfGain, p.values[0]); setChoice (ap::kLfFreq, p.values[1]); setBool (ap::kLfBell, p.values[2]);
+    setChoice (ap::kMfGain, p.values[3]); setChoice (ap::kMfFreq, p.values[4]);
+    setChoice (ap::kHfGain, p.values[5]); setChoice (ap::kHfFreq, p.values[6]); setBool (ap::kHfBell, p.values[7]);
+    setBool (ap::kEqIn, p.values[8]); setBool (ap::kFilter, p.values[9]); setBool (ap::kPolarity, p.values[10]);
+    setBool (ap::kAnalog, p.values[11]); setFloat (ap::kOutput, p.values[12]);
+    presetName = p.name;
+}
 void AP550Processor::loadFactoryPreset (int index)
 {
-    const auto presets = ap::factoryPresets();
-
-    if (presets.empty())
+    const auto& list = ap::factoryPresets();
+    if (index < 0 || index >= (int) list.size())
         return;
-
-    index = safeIndex (
-        index,
-        static_cast<int> (presets.size()) - 1);
-
-    const auto& preset =
-        presets[static_cast<size_t> (index)];
-
-    setChoice (ap::kLfGain, preset.lfGain);
-    setChoice (ap::kLfFreq, preset.lfFreq);
-    setBool (ap::kLfBell, preset.lfBell);
-
-    setChoice (ap::kMfGain, preset.mfGain);
-    setChoice (ap::kMfFreq, preset.mfFreq);
-
-    setChoice (ap::kHfGain, preset.hfGain);
-    setChoice (ap::kHfFreq, preset.hfFreq);
-    setBool (ap::kHfBell, preset.hfBell);
-
-    setBool (ap::kEqIn, preset.eqIn);
-    setBool (ap::kFilter, preset.filter);
-    setBool (ap::kPolarity, preset.polarity);
-    setBool (ap::kAnalog, preset.analog);
-
-    if (auto* parameter = apvts.getParameter (ap::kOutput))
-    {
-        const float normalized =
-            parameter->convertTo0to1 (preset.output);
-
-        parameter->beginChangeGesture();
-        parameter->setValueNotifyingHost (normalized);
-        parameter->endChangeGesture();
-    }
-
-    lastKey = -1;
+    presetIndex = index;
+    applyPresetValues (list[(size_t) index]);
 }
-
-// =============================================================================
-// IDENTIFICAR PRESET ACTUAL
-// =============================================================================
-
-int AP550Processor::getPresetIndex() const
+void AP550Processor::stepPreset (int dir)
 {
-    const auto presets = ap::factoryPresets();
-
-    for (int i = 0;
-         i < static_cast<int> (presets.size());
-         ++i)
-    {
-        const auto& preset =
-            presets[static_cast<size_t> (i)];
-
-        const float currentOutput =
-            apvts.getRawParameterValue (ap::kOutput) != nullptr
-                ? apvts.getRawParameterValue (ap::kOutput)->load()
-                : 0.0f;
-
-        if (idx (ap::kLfGain) == preset.lfGain
-            && idx (ap::kLfFreq) == preset.lfFreq
-            && flag (ap::kLfBell) == preset.lfBell
-            && idx (ap::kMfGain) == preset.mfGain
-            && idx (ap::kMfFreq) == preset.mfFreq
-            && idx (ap::kHfGain) == preset.hfGain
-            && idx (ap::kHfFreq) == preset.hfFreq
-            && flag (ap::kHfBell) == preset.hfBell
-            && flag (ap::kEqIn) == preset.eqIn
-            && flag (ap::kFilter) == preset.filter
-            && flag (ap::kPolarity) == preset.polarity
-            && flag (ap::kAnalog) == preset.analog
-            && std::abs (currentOutput - preset.output) < 0.06f)
-        {
-            return i;
-        }
-    }
-
-    return -1;
+    const auto& list = ap::factoryPresets();
+    int next = presetIndex + dir;
+    if (next < 0) next = (int) list.size() - 1;
+    if (next >= (int) list.size()) next = 0;
+    loadFactoryPreset (next);
 }
-
-juce::String AP550Processor::getPresetName() const
+juce::File AP550Processor::getUserPresetFolder() const
 {
-    const int index = getPresetIndex();
-
-    const auto presets = ap::factoryPresets();
-
-    if (index >= 0
-        && index < static_cast<int> (presets.size()))
-    {
-        return presets[static_cast<size_t> (index)].name;
-    }
-
-    return "Custom";
+    auto folder = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+        .getChildFile ("La Pauta").getChildFile ("AP550 Pro").getChildFile ("Presets");
+    folder.createDirectory();
+    return folder;
 }
-
-// =============================================================================
-// SIGUIENTE / ANTERIOR PRESET
-// =============================================================================
-
-void AP550Processor::stepPreset (int direction)
+juce::Array<juce::File> AP550Processor::listUserPresets() const
 {
-    const auto presets = ap::factoryPresets();
-
-    if (presets.empty())
-        return;
-
-    int index = getPresetIndex();
-
-    if (index < 0)
-        index = 0;
-    else
-        index += direction;
-
-    const int count =
-        static_cast<int> (presets.size());
-
-    index = (index % count + count) % count;
-
-    loadFactoryPreset (index);
+    return getUserPresetFolder().findChildFiles (juce::File::findFiles, false, "*.xml");
 }
-
-// =============================================================================
-// CARPETA DE PRESETS DEL USUARIO
-// =============================================================================
-
-juce::File AP550Processor::getUserPresetDir() const
+void AP550Processor::saveUserPreset (const juce::String& name)
 {
-    auto directory =
-        juce::File::getSpecialLocation (
-            juce::File::userApplicationDataDirectory);
-
-    directory = directory.getChildFile ("La Pauta")
-                         .getChildFile ("AP550 Pro")
-                         .getChildFile ("Presets");
-
-    return directory;
-}
-
-// =============================================================================
-// LISTAR PRESETS DEL USUARIO
-// =============================================================================
-
-juce::Array<juce::File>
-AP550Processor::listUserPresets() const
-{
-    juce::Array<juce::File> files;
-
-    const auto directory = getUserPresetDir();
-
-    if (!directory.isDirectory())
-        return files;
-
-    directory.findChildFiles (
-        files,
-        juce::File::findFiles,
-        false,
-        "*.xml");
-
-    return files;
-}
-
-// =============================================================================
-// GUARDAR PRESET DEL USUARIO
-// =============================================================================
-
-bool AP550Processor::saveUserPreset (
-    const juce::String& name)
-{
-    const juce::String cleanName =
-        name.trim()
-            .replaceCharacters ("\\/:*?\"<>|", "________");
-
-    if (cleanName.isEmpty())
-        return false;
-
-    const auto directory = getUserPresetDir();
-
-    if (!directory.createDirectory())
-        return false;
-
-    const auto file =
-        directory.getChildFile (cleanName + ".xml");
-
+    auto file = getUserPresetFolder().getChildFile (name + ".xml");
     auto state = apvts.copyState();
-
-    state.setProperty (
-        "userPresetName",
-        cleanName,
-        nullptr);
-
-    if (auto xml = state.createXml())
-        return xml->writeTo (file);
-
-    return false;
+    std::unique_ptr<juce::XmlElement> xml (state.createXml());
+    if (xml != nullptr)
+        xml->writeTo (file);
+    presetName = name;
 }
-
-// =============================================================================
-// CARGAR PRESET DEL USUARIO
-// =============================================================================
-
-bool AP550Processor::loadUserPreset (
-    const juce::File& file)
+void AP550Processor::loadUserPreset (const juce::File& file)
 {
-    if (!file.existsAsFile())
-        return false;
-
-    const auto xml = juce::XmlDocument::parse (file);
-
+    std::unique_ptr<juce::XmlElement> xml (juce::XmlDocument::parse (file));
     if (xml == nullptr)
-        return false;
-
-    if (!xml->hasTag
+        return;
+    auto tree = juce::ValueTree::fromXml (*xml);
+    if (tree.isValid())
+    {
+        apvts.replaceState (tree);
+        presetName = file.getFileNameWithoutExtension();
+        presetIndex = -1;
+    }
+}
