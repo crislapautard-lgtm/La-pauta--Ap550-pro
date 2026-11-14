@@ -1,54 +1,69 @@
 #pragma once
-#include <JuceHeader.h>
+
 #include "PluginProcessor.h"
 
-class AP550Editor : public juce::AudioProcessorEditor, public juce::Timer
+//==============================================================================
+//  Interfaz de La Pauta AP550 Pro
+//  Mismo diseño y tamaño del original (438 x 830), placa en gris plateado oscuro.
+//  Todo se dibuja a mano: no usa imágenes externas.
+//==============================================================================
+class AP550Editor : public juce::AudioProcessorEditor,
+                    private juce::Timer
 {
 public:
-    AP550Editor (AP550Processor& p);
+    explicit AP550Editor (AP550Processor&);
     ~AP550Editor() override;
 
-    void paint (juce::Graphics& g) override;
-    void mouseDown (const juce::MouseEvent& e) override;
-    void mouseDrag (const juce::MouseEvent& e) override;
-    void mouseUp (const juce::MouseEvent& e) override;
-    void mouseDoubleClick (const juce::MouseEvent& e) override;
-    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override;
-    void timerCallback() override;
+    void paint (juce::Graphics&) override;
+
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
 private:
+    enum class DragKind { none, gain, output };
+
+    void timerCallback() override;
+    void buildBackground();
+    float scale() const { return (float) getWidth() / (float) kW; }
+
+    // Lectura / escritura de parámetros
+    int   getIdx (const char* id) const;
+    bool  getBool (const char* id) const;
+    float getVal (const char* id) const;
+    void  setIdx (const char* id, int index);
+    void  setVal (const char* id, float value);
+    void  toggleBool (const char* id);
+
+    juce::String stateKey() const;
+
+    // Dibujo
+    void drawToolButton (juce::Graphics&, juce::Rectangle<float>, int kind, bool pressed) const;
+    void drawMeterNeedle (juce::Graphics&, juce::Rectangle<float> face, float db) const;
+
+    // Acciones
+    void runTool (int tool);
+    void showLoadMenu();
+    void showSaveDialog();
+
     static constexpr int kW = 438;
     static constexpr int kH = 830;
 
     AP550Processor& proc;
     juce::Image bg;
-    float needleL = -60.0f;
-    float needleR = -60.0f;
-    juce::String lastKey;
+
+    DragKind dragKind = DragKind::none;
+    int dragBand = -1;
+    float dragStartY = 0.f, dragStartVal = 0.f;
+    int dragLastIdx = -1;
+    juce::RangedAudioParameter* dragParam = nullptr;
+
     int pressedTool = -1;
 
-    enum class DragKind { none, gain, output };
-    DragKind dragKind = DragKind::none;
-    int dragBand = 0;
-    juce::RangedAudioParameter* dragParam = nullptr;
-    float dragStartY = 0.0f;
-    float dragStartVal = 0.0f;
-    int dragLastIdx = 0;
-
-    float scale() const { return (float) getWidth() / (float) kW; }
-    void buildBackground();
-    int getIdx (const char* id) const;
-    bool getBool (const char* id) const;
-    float getVal (const char* id) const;
-    void setIdx (const char* id, int index);
-    void setVal (const char* id, float value);
-    void toggleBool (const char* id);
-    juce::String stateKey() const;
-    void drawToolButton (juce::Graphics& g, juce::Rectangle<float> r, int kind, bool pressed) const;
-    void drawMeterNeedle (juce::Graphics& g, juce::Rectangle<float> face, float db) const;
-    void runTool (int tool);
-    void showLoadMenu();
-    void showSaveDialog();
+    float needleL = -60.f, needleR = -60.f;
+    juce::String lastKey;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AP550Editor)
 };
