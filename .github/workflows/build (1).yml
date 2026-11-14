@@ -1,0 +1,52 @@
+name: Compilar plugin
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Configurar
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Compilar
+        run: cmake --build build --config Release
+
+      - name: Guardar el plugin compilado
+        uses: actions/upload-artifact@v4
+        with:
+          name: La-Pauta-AP550-Pro-${{ matrix.os }}
+          path: build/LaPautaAP550Pro_artefacts/Release
+
+      - name: Instalador de Windows
+        if: runner.os == 'Windows'
+        run: |
+          choco install innosetup -y --no-progress
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+
+      - name: Instalador de macOS
+        if: runner.os == 'macOS'
+        run: |
+          A=build/LaPautaAP550Pro_artefacts/Release
+          mkdir -p pkgroot/vst3 pkgroot/app installer_out
+          cp -R "$A/VST3/La Pauta AP550 Pro.vst3" pkgroot/vst3/
+          cp -R "$A/Standalone/La Pauta AP550 Pro.app" pkgroot/app/
+          pkgbuild --root pkgroot/vst3 --identifier com.lapauta.ap550pro.vst3 --version 1.0.0 --install-location "/Library/Audio/Plug-Ins/VST3" vst3.pkg
+          pkgbuild --root pkgroot/app --identifier com.lapauta.ap550pro.app --version 1.0.0 --install-location "/Applications" app.pkg
+          productbuild --package vst3.pkg --package app.pkg installer_out/La-Pauta-AP550-Pro.pkg
+
+      - name: Guardar el instalador
+        uses: actions/upload-artifact@v4
+        with:
+          name: Instalador-${{ matrix.os }}
+          path: installer_out
